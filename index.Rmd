@@ -9,22 +9,94 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## R Markdown
+## Overview
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+The objective of this project is to predict whether barbell lifts are correctly performed and, when they are not, the type of error. The data consist of measurements from sensors on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 4 different ways. The data comes from this source:
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. **Qualitative Activity Recognition of Weight Lifting Exercises**. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
 
-```{r cars}
-summary(cars)
+Read more: <http://groupware.les.inf.puc-rio.br/har>.
+
+From the machine learning perspective, the project is a supervised classification problem and can be tackled by a wide set of methods. We have found that random forests achieve a high accuracy.
+
+## Data preparation
+
+The following commands load the data and print a useful summary:
+
+```{r}
+raw_data <- read.csv('pml-training.csv', na.strings = c('NA', '', '#DIV/0!'))
+str(raw_data)
 ```
 
-## Including Plots
+We see that the first variable (X) is an index and can be deleted. Moreover, many variables have missing values. We can inspect how many missing values there are with a command like `colSums(is.na(raw_data))`. We decide to delete all the variables that have more than 75% of missing values:
 
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
+```{r}
+raw_data <- raw_data[, -1]
+raw_data <- raw_data[, colMeans(is.na(raw_data)) <= 0.75]
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+We can also remove variables that have zero or near zero variance:
+
+```{r, message=FALSE}
+library(caret)
+raw_data <- raw_data[, -nearZeroVar(raw_data)]
+```
+
+After this cleaning, the number of observations and variables are respectively:
+```{r}
+dim(raw_data)
+```
+
+Finally, we split the dataset between a training and a testing set:
+
+```{r}
+set.seed(42)
+inTrain = createDataPartition(raw_data$classe, p = 0.7, list = FALSE)
+training = raw_data[inTrain,]
+testing = raw_data[-inTrain,]
+```
+
+## Data exploration
+
+First, we check that the classes are rougly balanced:
+
+```{r}
+table(raw_data$class)
+```
+
+Then it is useful to visualize the correlations between the variables. The next plot shows that there are not too many highly correlated variables.
+
+```{r pressure, message=FALSE, out.height='80%' }
+library(corrplot)
+corrplot(cor(Filter(is.numeric, training)), method = "color", tl.cex = 0.5, tl.col = "black")
+```
+
+## Fitting a random forest
+
+Random forests are usually a good first choice because they are simple to use (they don't require a lot of preprocessing, like normalization) and they are not too prone to overfitting. Another advantage of random forests is the possibility to estimate the features importance (which is outside the scope of this project). The next command fits a random forest to the training data using the caret package. We use 3-fold cross-validation as resampling method because it is faster than the bootstrapping technique.
+
+```{r}
+ctrl <- trainControl(method = "cv", number = 3)
+mdl <- train(classe ~ ., data = training, method = "rf", trControl = ctrl)
+mdl
+```
+
+Now we compute the predictions on the test set:
+
+```{r}
+confusionMatrix(testing$classe, predict(mdl, newdata = testing))
+```
+
+Since the accuracy on the test set is very high (0.999), there is no need to try other models.
+
+## Predictions on new data
+
+We now load the test data and perform the predictions:
+
+```{r}
+new_data <- read.csv('pml-testing.csv', na.strings = c('NA', '', '#DIV/0!'))
+predict(mdl, newdata = new_data)
+```
+
+These predictions will be submitted for the automated grading.
+
